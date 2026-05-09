@@ -35,6 +35,7 @@ export interface ResourceLoader {
 	getSystemPrompt(): string | undefined;
 	getAppendSystemPrompt(): string[];
 	extendResources(paths: ResourceExtensionPaths): void;
+	addExtensionPaths(paths: string[]): void;
 	reload(): Promise<void>;
 }
 
@@ -277,6 +278,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getAppendSystemPrompt(): string[] {
 		return this.appendSystemPrompt;
+	}
+
+	addExtensionPaths(paths: string[]): void {
+		for (const p of paths) {
+			if (!this.additionalExtensionPaths.includes(p)) {
+				this.additionalExtensionPaths.push(p);
+			}
+		}
 	}
 
 	extendResources(paths: ResourceExtensionPaths): void {

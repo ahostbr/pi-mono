@@ -55,6 +55,7 @@ import {
 	getAuthPath,
 	getDebugLogPath,
 	getDocsPath,
+	getPackageDir,
 	getShareViewerUrl,
 	VERSION,
 } from "../../config.js";
@@ -2543,6 +2544,11 @@ export class InteractiveMode {
 			if (text === "/keys") {
 				this.handleKeysCommand();
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/load-ext" || text.startsWith("/load-ext ")) {
+				this.editor.setText("");
+				await this.handleLoadExtCommand(text);
 				return;
 			}
 			if (text === "/fork") {
@@ -5213,6 +5219,78 @@ export class InteractiveMode {
 	 */
 	private getEditorKeyDisplay(action: Keybinding): string {
 		return this.capitalizeKey(keyText(action));
+	}
+
+	private async handleLoadExtCommand(text: string): Promise<void> {
+		if (this.session.isStreaming) {
+			this.showWarning("Wait for the current response to finish before loading extensions.");
+			return;
+		}
+
+		const args = text.replace("/load-ext", "").trim();
+		const extDir = path.join(getPackageDir(), "examples", "extensions");
+
+		if (!fs.existsSync(extDir)) {
+			this.showWarning(`Extensions directory not found: ${extDir}`);
+			return;
+		}
+
+		const entries = fs.readdirSync(extDir, { withFileTypes: true });
+		const available: { name: string; extPath: string }[] = [];
+		for (const entry of entries) {
+			if (entry.name === "README.md") continue;
+			const entryPath = path.join(extDir, entry.name);
+			if (entry.isDirectory()) {
+				const idx = path.join(entryPath, "index.ts");
+				const idxJs = path.join(entryPath, "index.js");
+				if (fs.existsSync(idx) || fs.existsSync(idxJs)) {
+					available.push({ name: entry.name, extPath: entryPath });
+				}
+			} else if (entry.name.endsWith(".ts") || entry.name.endsWith(".js")) {
+				available.push({ name: entry.name.replace(/\.[tj]s$/, ""), extPath: entryPath });
+			}
+		}
+
+		if (args === "list" || args === "") {
+			const loaded = this.session.resourceLoader.getExtensions().extensions.map((e) => e.path);
+			const lines = [
+				theme.bold(theme.fg("accent", "Available Extensions")),
+				"",
+				...available.map((ext) => {
+					const isLoaded = loaded.some((p) => p.includes(ext.name));
+					const marker = isLoaded ? theme.fg("success", "●") : theme.fg("dim", "○");
+					return `  ${marker} ${ext.name}`;
+				}),
+				"",
+				theme.fg("dim", "Usage: /load-ext <name|all>   /load-ext list"),
+			];
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(lines.join("\n"), 1, 1));
+			this.chatContainer.addChild(new Spacer(1));
+			this.ui.requestRender();
+			return;
+		}
+
+		const toLoad: string[] = [];
+		if (args === "all") {
+			toLoad.push(...available.map((e) => e.extPath));
+		} else {
+			const names = args.split(/[\s,]+/).filter(Boolean);
+			for (const name of names) {
+				const match = available.find((e) => e.name === name || e.name.startsWith(name));
+				if (match) {
+					toLoad.push(match.extPath);
+				} else {
+					this.showWarning(`Extension not found: ${name}`);
+				}
+			}
+		}
+
+		if (toLoad.length === 0) return;
+
+		this.session.resourceLoader.addExtensionPaths(toLoad);
+		this.showStatus(`Loading ${toLoad.length} extension(s)...`);
+		await this.handleReloadCommand();
 	}
 
 	private handleKeysCommand(): void {

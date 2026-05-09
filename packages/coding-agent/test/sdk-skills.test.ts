@@ -60,6 +60,7 @@ This is a test skill.
 			getSystemPrompt: () => undefined,
 			getAppendSystemPrompt: () => [],
 			extendResources: () => {},
+			addExtensionPaths: () => {},
 			reload: async () => {},
 		};
 
@@ -93,6 +94,7 @@ This is a test skill.
 			getSystemPrompt: () => undefined,
 			getAppendSystemPrompt: () => [],
 			extendResources: () => {},
+			addExtensionPaths: () => {},
 			reload: async () => {},
 		};
 
