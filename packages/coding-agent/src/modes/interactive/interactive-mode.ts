@@ -681,6 +681,9 @@ export class InteractiveMode {
 		// Enable mouse click-to-focus for pane switching
 		this.enableMousePaneFocus();
 
+		// Provide full unbounded content for scroll buffer
+		this.ui.scrollBufferProvider = (width: number) => this.paneContainer.renderActivePaneUnbounded(width);
+
 		this.isInitialized = true;
 
 		// Initialize extensions first so resources are shown before messages
@@ -3815,6 +3818,8 @@ export class InteractiveMode {
 			const selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
+					compactReserveTokens: this.settingsManager.getCompactionReserveTokens(),
+					compactKeepRecentTokens: this.settingsManager.getCompactionKeepRecentTokens(),
 					showImages: this.settingsManager.getShowImages(),
 					imageWidthCells: this.settingsManager.getImageWidthCells(),
 					autoResizeImages: this.settingsManager.getImageAutoResize(),
@@ -3844,6 +3849,12 @@ export class InteractiveMode {
 					onAutoCompactChange: (enabled) => {
 						this.session.setAutoCompactionEnabled(enabled);
 						this.footer.setAutoCompactEnabled(enabled);
+					},
+					onCompactReserveTokensChange: (tokens) => {
+						this.settingsManager.setCompactionReserveTokens(tokens);
+					},
+					onCompactKeepRecentTokensChange: (tokens) => {
+						this.settingsManager.setCompactionKeepRecentTokens(tokens);
 					},
 					onShowImagesChange: (enabled) => {
 						this.settingsManager.setShowImages(enabled);
@@ -5221,20 +5232,21 @@ export class InteractiveMode {
 		return this.capitalizeKey(keyText(action));
 	}
 
-	private async handleLoadExtCommand(text: string): Promise<void> {
-		if (this.session.isStreaming) {
-			this.showWarning("Wait for the current response to finish before loading extensions.");
-			return;
-		}
+	private static readonly CUSTOM_EXTENSIONS = ["lmstudio"];
 
-		const args = text.replace("/load-ext", "").trim();
-		const extDir = path.join(getPackageDir(), "examples", "extensions");
+	private static readonly CUST_EXTENSIONS = [
+		"handoff",
+		"trigger-compact",
+		"subagent",
+		"summarize",
+		"question",
+		"questionnaire",
+		"claude-rules",
+		"todo",
+		"working-indicator",
+	];
 
-		if (!fs.existsSync(extDir)) {
-			this.showWarning(`Extensions directory not found: ${extDir}`);
-			return;
-		}
-
+	private discoverAllExtensions(extDir: string): { name: string; extPath: string }[] {
 		const entries = fs.readdirSync(extDir, { withFileTypes: true });
 		const available: { name: string; extPath: string }[] = [];
 		for (const entry of entries) {
@@ -5250,8 +5262,41 @@ export class InteractiveMode {
 				available.push({ name: entry.name.replace(/\.[tj]s$/, ""), extPath: entryPath });
 			}
 		}
+		return available;
+	}
 
-		if (args === "list" || args === "") {
+	private loadExtensionsByName(extDir: string, names: string[]): { toLoad: string[]; missing: string[] } {
+		const toLoad: string[] = [];
+		const missing: string[] = [];
+		const available = this.discoverAllExtensions(extDir);
+		for (const name of names) {
+			const match = available.find((e) => e.name === name || e.name.startsWith(name));
+			if (match) {
+				toLoad.push(match.extPath);
+			} else {
+				missing.push(name);
+			}
+		}
+		return { toLoad, missing };
+	}
+
+	private async handleLoadExtCommand(text: string): Promise<void> {
+		if (this.session.isStreaming) {
+			this.showWarning("Wait for the current response to finish before loading extensions.");
+			return;
+		}
+
+		const extDir = path.join(getPackageDir(), "examples", "extensions");
+		if (!fs.existsSync(extDir)) {
+			this.showWarning(`Extensions directory not found: ${extDir}`);
+			return;
+		}
+
+		const args = text.replace("/load-ext", "").trim();
+
+		// /load-ext list — show all available extensions
+		if (args === "list") {
+			const available = this.discoverAllExtensions(extDir);
 			const loaded = this.session.resourceLoader.getExtensions().extensions.map((e) => e.path);
 			const lines = [
 				theme.bold(theme.fg("accent", "Available Extensions")),
@@ -5262,7 +5307,10 @@ export class InteractiveMode {
 					return `  ${marker} ${ext.name}`;
 				}),
 				"",
-				theme.fg("dim", "Usage: /load-ext <name|all>   /load-ext list"),
+				theme.fg("dim", "/load-ext              custom extensions (lmstudio)"),
+				theme.fg("dim", "/load-ext cust         utility pack (handoff, trigger-compact, ...)"),
+				theme.fg("dim", "/load-ext all          every extension"),
+				theme.fg("dim", "/load-ext <name ...>   specific extension(s) by name"),
 			];
 			this.chatContainer.addChild(new Spacer(1));
 			this.chatContainer.addChild(new Text(lines.join("\n"), 1, 1));
@@ -5271,25 +5319,46 @@ export class InteractiveMode {
 			return;
 		}
 
-		const toLoad: string[] = [];
+		// /load-ext all — load everything
 		if (args === "all") {
-			toLoad.push(...available.map((e) => e.extPath));
-		} else {
-			const names = args.split(/[\s,]+/).filter(Boolean);
-			for (const name of names) {
-				const match = available.find((e) => e.name === name || e.name.startsWith(name));
-				if (match) {
-					toLoad.push(match.extPath);
-				} else {
-					this.showWarning(`Extension not found: ${name}`);
-				}
-			}
+			const available = this.discoverAllExtensions(extDir);
+			const toLoad = available.map((e) => e.extPath);
+			if (toLoad.length === 0) return;
+			this.session.resourceLoader.addExtensionPaths(toLoad);
+			this.showStatus(`Loading all ${toLoad.length} extension(s)...`);
+			await this.handleReloadCommand();
+			return;
 		}
 
-		if (toLoad.length === 0) return;
+		// /load-ext cust — load the utility pack
+		if (args === "cust") {
+			const { toLoad, missing } = this.loadExtensionsByName(extDir, InteractiveMode.CUST_EXTENSIONS);
+			if (missing.length > 0) this.showWarning(`Extensions not found: ${missing.join(", ")}`);
+			if (toLoad.length === 0) return;
+			this.session.resourceLoader.addExtensionPaths(toLoad);
+			this.showStatus(`Loading ${toLoad.length} cust extension(s): ${InteractiveMode.CUST_EXTENSIONS.join(", ")}`);
+			await this.handleReloadCommand();
+			return;
+		}
 
+		// /load-ext <name ...> — load specific extensions by name
+		if (args.length > 0) {
+			const names = args.split(/[\s,]+/).filter(Boolean);
+			const { toLoad, missing } = this.loadExtensionsByName(extDir, names);
+			if (missing.length > 0) this.showWarning(`Extensions not found: ${missing.join(", ")}`);
+			if (toLoad.length === 0) return;
+			this.session.resourceLoader.addExtensionPaths(toLoad);
+			this.showStatus(`Loading ${toLoad.length} extension(s)...`);
+			await this.handleReloadCommand();
+			return;
+		}
+
+		// /load-ext (bare) — load only curated custom extensions
+		const { toLoad, missing } = this.loadExtensionsByName(extDir, InteractiveMode.CUSTOM_EXTENSIONS);
+		if (missing.length > 0) this.showWarning(`Extensions not found: ${missing.join(", ")}`);
+		if (toLoad.length === 0) return;
 		this.session.resourceLoader.addExtensionPaths(toLoad);
-		this.showStatus(`Loading ${toLoad.length} extension(s)...`);
+		this.showStatus(`Loading ${toLoad.length} custom extension(s): ${InteractiveMode.CUSTOM_EXTENSIONS.join(", ")}`);
 		await this.handleReloadCommand();
 	}
 
@@ -5741,6 +5810,16 @@ export class InteractiveMode {
 			const col = Number.parseInt(match[2], 10) - 1;
 			const row = Number.parseInt(match[3], 10) - 1;
 			const isPress = match[4] === "M";
+
+			// Scroll wheel: btn 64 = up, btn 65 = down
+			if (btn === 64) {
+				this.ui.scrollUp(3);
+				return { consume: true };
+			}
+			if (btn === 65) {
+				this.ui.scrollDown(3);
+				return { consume: true };
+			}
 
 			if (btn !== 0 || !isPress) return { consume: true };
 

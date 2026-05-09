@@ -31,6 +31,8 @@ const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 
 export interface SettingsConfig {
 	autoCompact: boolean;
+	compactReserveTokens: number;
+	compactKeepRecentTokens: number;
 	showImages: boolean;
 	imageWidthCells: number;
 	autoResizeImages: boolean;
@@ -59,6 +61,8 @@ export interface SettingsConfig {
 
 export interface SettingsCallbacks {
 	onAutoCompactChange: (enabled: boolean) => void;
+	onCompactReserveTokensChange: (tokens: number) => void;
+	onCompactKeepRecentTokensChange: (tokens: number) => void;
 	onShowImagesChange: (enabled: boolean) => void;
 	onImageWidthCellsChange: (width: number) => void;
 	onAutoResizeImagesChange: (enabled: boolean) => void;
@@ -213,6 +217,20 @@ export class SettingsSelectorComponent extends Container {
 				description: "Automatically compact context when it gets too large",
 				currentValue: config.autoCompact ? "true" : "false",
 				values: ["true", "false"],
+			},
+			{
+				id: "compact-reserve",
+				label: "Compact reserve",
+				description: "Token headroom before auto-compact triggers (lower = compact sooner)",
+				currentValue: String(config.compactReserveTokens),
+				values: ["8192", "16384", "32768", "65536"],
+			},
+			{
+				id: "compact-keep-recent",
+				label: "Compact keep recent",
+				description: "Tokens of recent conversation to preserve after compaction",
+				currentValue: String(config.compactKeepRecentTokens),
+				values: ["10000", "20000", "40000", "60000"],
 			},
 			{
 				id: "steering-mode",
@@ -456,6 +474,12 @@ export class SettingsSelectorComponent extends Container {
 				switch (id) {
 					case "autocompact":
 						callbacks.onAutoCompactChange(newValue === "true");
+						break;
+					case "compact-reserve":
+						callbacks.onCompactReserveTokensChange(parseInt(newValue, 10));
+						break;
+					case "compact-keep-recent":
+						callbacks.onCompactKeepRecentTokensChange(parseInt(newValue, 10));
 						break;
 					case "show-images":
 						callbacks.onShowImagesChange(newValue === "true");

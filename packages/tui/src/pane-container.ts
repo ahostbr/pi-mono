@@ -83,6 +83,12 @@ export class PaneContainer implements BoundsAwareComponent {
 		this.activePaneId = id;
 	}
 
+	renderActivePaneUnbounded(width: number): string[] {
+		const component = this.panes.get(this.activePaneId);
+		if (!component) return [];
+		return component.render(width);
+	}
+
 	// --- Pane management ---
 
 	setPane(paneId: string, component: Component): void {

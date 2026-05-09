@@ -5,7 +5,8 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
-import { resolve } from "node:path";
+import fs from "node:fs";
+import path, { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import { ProcessTerminal, setKeybindings, TUI } from "@earendil-works/pi-tui";
@@ -15,7 +16,7 @@ import { processFileArguments } from "./cli/file-processor.js";
 import { buildInitialMessage } from "./cli/initial-message.js";
 import { listModels } from "./cli/list-models.js";
 import { selectSession } from "./cli/session-picker.js";
-import { ENV_SESSION_DIR, expandTildePath, getAgentDir, VERSION } from "./config.js";
+import { ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.js";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.js";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -514,7 +515,30 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 	time("createSessionManager");
 
-	const resolvedExtensionPaths = resolveCliPaths(cwd, parsed.extensions);
+	const DEFAULT_EXTENSIONS = [
+		"claude-skills-loader",
+		"lmstudio",
+		"handoff",
+		"trigger-compact",
+		"subagent",
+		"summarize",
+		"question",
+		"questionnaire",
+		"claude-rules",
+		"todo",
+		"working-indicator",
+	];
+	const extDir = path.join(getPackageDir(), "examples", "extensions");
+	const defaultExtPaths = DEFAULT_EXTENSIONS.map((name) => {
+		const dir = path.join(extDir, name);
+		if (fs.existsSync(dir)) return dir;
+		const ts = `${dir}.ts`;
+		if (fs.existsSync(ts)) return ts;
+		const js = `${dir}.js`;
+		if (fs.existsSync(js)) return js;
+		return null;
+	}).filter((p): p is string => p !== null);
+	const resolvedExtensionPaths = [...(resolveCliPaths(cwd, parsed.extensions) ?? []), ...defaultExtPaths];
 	const resolvedSkillPaths = resolveCliPaths(cwd, parsed.skills);
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);

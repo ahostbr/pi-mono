@@ -259,6 +259,9 @@ export class TUI extends Container {
 	private previousViewportTop = 0; // Track previous viewport top for resize-aware cursor moves
 	private fullRedrawCount = 0;
 	private stopped = false;
+	private _scrollOffset = 0;
+	private _scrollBuffer: string[] = [];
+	public scrollBufferProvider?: (width: number) => string[];
 
 	// Overlay stack for modal components rendered on top of base content
 	private focusOrderCounter = 0;
@@ -280,6 +283,26 @@ export class TUI extends Container {
 
 	get fullRedraws(): number {
 		return this.fullRedrawCount;
+	}
+
+	get scrollOffset(): number {
+		return this._scrollOffset;
+	}
+
+	scrollUp(lines = 3): void {
+		this._scrollOffset += lines;
+		this.requestRender();
+	}
+
+	scrollDown(lines = 3): void {
+		this._scrollOffset = Math.max(0, this._scrollOffset - lines);
+		this.requestRender();
+	}
+
+	scrollToBottom(): void {
+		if (this._scrollOffset === 0) return;
+		this._scrollOffset = 0;
+		this.requestRender();
 	}
 
 	getShowHardwareCursor(): boolean {
@@ -557,6 +580,12 @@ export class TUI extends Container {
 				return;
 			}
 			data = current;
+		}
+
+		// Non-mouse input snaps viewport back to bottom
+		if (this._scrollOffset > 0 && !data.startsWith("\x1b[<")) {
+			this._scrollOffset = 0;
+			this.requestRender();
 		}
 
 		// Consume terminal cell size responses without blocking unrelated input.
@@ -979,6 +1008,18 @@ export class TUI extends Container {
 
 		newLines = this.applyLineResets(newLines);
 
+		// Update scroll buffer from provider (full unbounded content for scrolling)
+		if (this._scrollOffset === 0 && this.scrollBufferProvider) {
+			this._scrollBuffer = this.scrollBufferProvider(width);
+		}
+
+		// Clamp scroll offset to available scroll buffer content
+		const scrollSource = this._scrollBuffer.length > 0 ? this._scrollBuffer : newLines;
+		const maxScroll = Math.max(0, scrollSource.length - height);
+		if (this._scrollOffset > maxScroll) {
+			this._scrollOffset = maxScroll;
+		}
+
 		// Helper to clear scrollback and viewport and render all new lines
 		const fullRender = (clear: boolean): void => {
 			this.fullRedrawCount += 1;
@@ -1017,6 +1058,22 @@ export class TUI extends Container {
 			const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})\n`;
 			fs.appendFileSync(logPath, msg);
 		};
+
+		// When scrolled up, slice the full scroll buffer to the scrolled viewport and force full redraw
+		if (this._scrollOffset > 0) {
+			const end = scrollSource.length - this._scrollOffset;
+			const start = Math.max(0, end - height);
+			const pct = Math.round(((scrollSource.length - this._scrollOffset) / scrollSource.length) * 100);
+			const scrollIndicator = `\x1b[7m ↑ ${pct}% — scroll down or type to return \x1b[0m`;
+			const sliced = scrollSource.slice(start, end);
+			while (sliced.length < height) {
+				sliced.unshift("");
+			}
+			sliced[sliced.length - 1] = scrollIndicator;
+			newLines = sliced;
+			fullRender(true);
+			return;
+		}
 
 		// First render - just output everything without clearing (assumes clean screen)
 		if (this.previousLines.length === 0 && !widthChanged && !heightChanged) {
