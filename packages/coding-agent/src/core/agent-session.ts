@@ -947,6 +947,7 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
+			sessionId: this.sessionManager.getSessionId(),
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
@@ -1771,6 +1772,14 @@ export class AgentSession {
 		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") return;
 
 		const contextWindow = this.model?.contextWindow ?? 0;
+
+		// Override token settings with percentage-based values when configured
+		const thresholdPct = this.settingsManager.getCompactionThresholdPercent();
+		const keepRecentPct = this.settingsManager.getCompactionKeepRecentPercent();
+		if (contextWindow > 0) {
+			settings.reserveTokens = Math.round(contextWindow * (1 - thresholdPct / 100));
+			settings.keepRecentTokens = Math.round(contextWindow * (keepRecentPct / 100));
+		}
 
 		// Skip overflow check if the message came from a different model.
 		// This handles the case where user switched from a smaller-context model (e.g. opus)

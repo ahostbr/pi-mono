@@ -9,6 +9,8 @@ export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
 	keepRecentTokens?: number; // default: 20000
+	thresholdPercent?: number; // default: 90 — compact when context usage exceeds this % of window
+	keepRecentPercent?: number; // default: 15 — preserve this % of context window after compaction
 }
 
 export interface BranchSummarySettings {
@@ -678,30 +680,38 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getCompactionThresholdPercent(): number {
+		return this.settings.compaction?.thresholdPercent ?? 90;
+	}
+
+	setCompactionThresholdPercent(percent: number): void {
+		if (!this.globalSettings.compaction) {
+			this.globalSettings.compaction = {};
+		}
+		this.globalSettings.compaction.thresholdPercent = percent;
+		this.markModified("compaction", "thresholdPercent");
+		this.save();
+	}
+
+	getCompactionKeepRecentPercent(): number {
+		return this.settings.compaction?.keepRecentPercent ?? 15;
+	}
+
+	setCompactionKeepRecentPercent(percent: number): void {
+		if (!this.globalSettings.compaction) {
+			this.globalSettings.compaction = {};
+		}
+		this.globalSettings.compaction.keepRecentPercent = percent;
+		this.markModified("compaction", "keepRecentPercent");
+		this.save();
+	}
+
 	getCompactionReserveTokens(): number {
 		return this.settings.compaction?.reserveTokens ?? 16384;
 	}
 
-	setCompactionReserveTokens(tokens: number): void {
-		if (!this.globalSettings.compaction) {
-			this.globalSettings.compaction = {};
-		}
-		this.globalSettings.compaction.reserveTokens = tokens;
-		this.markModified("compaction", "reserveTokens");
-		this.save();
-	}
-
 	getCompactionKeepRecentTokens(): number {
 		return this.settings.compaction?.keepRecentTokens ?? 20000;
-	}
-
-	setCompactionKeepRecentTokens(tokens: number): void {
-		if (!this.globalSettings.compaction) {
-			this.globalSettings.compaction = {};
-		}
-		this.globalSettings.compaction.keepRecentTokens = tokens;
-		this.markModified("compaction", "keepRecentTokens");
-		this.save();
 	}
 
 	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {

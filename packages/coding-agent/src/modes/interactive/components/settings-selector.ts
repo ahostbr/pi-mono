@@ -31,8 +31,8 @@ const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 
 export interface SettingsConfig {
 	autoCompact: boolean;
-	compactReserveTokens: number;
-	compactKeepRecentTokens: number;
+	compactThresholdPercent: number;
+	compactKeepRecentPercent: number;
 	showImages: boolean;
 	imageWidthCells: number;
 	autoResizeImages: boolean;
@@ -61,8 +61,8 @@ export interface SettingsConfig {
 
 export interface SettingsCallbacks {
 	onAutoCompactChange: (enabled: boolean) => void;
-	onCompactReserveTokensChange: (tokens: number) => void;
-	onCompactKeepRecentTokensChange: (tokens: number) => void;
+	onCompactThresholdPercentChange: (percent: number) => void;
+	onCompactKeepRecentPercentChange: (percent: number) => void;
 	onShowImagesChange: (enabled: boolean) => void;
 	onImageWidthCellsChange: (width: number) => void;
 	onAutoResizeImagesChange: (enabled: boolean) => void;
@@ -219,18 +219,18 @@ export class SettingsSelectorComponent extends Container {
 				values: ["true", "false"],
 			},
 			{
-				id: "compact-reserve",
-				label: "Compact reserve",
-				description: "Token headroom before auto-compact triggers (lower = compact sooner)",
-				currentValue: String(config.compactReserveTokens),
-				values: ["8192", "16384", "32768", "65536"],
+				id: "compact-threshold",
+				label: "Compact at %",
+				description: "Auto-compact when context usage exceeds this % of the model's window",
+				currentValue: `${config.compactThresholdPercent}%`,
+				values: ["50%", "60%", "70%", "80%", "90%"],
 			},
 			{
 				id: "compact-keep-recent",
-				label: "Compact keep recent",
-				description: "Tokens of recent conversation to preserve after compaction",
-				currentValue: String(config.compactKeepRecentTokens),
-				values: ["10000", "20000", "40000", "60000"],
+				label: "Keep recent %",
+				description: "Preserve this % of the context window after compaction",
+				currentValue: `${config.compactKeepRecentPercent}%`,
+				values: ["5%", "10%", "15%", "25%", "35%"],
 			},
 			{
 				id: "steering-mode",
@@ -475,11 +475,11 @@ export class SettingsSelectorComponent extends Container {
 					case "autocompact":
 						callbacks.onAutoCompactChange(newValue === "true");
 						break;
-					case "compact-reserve":
-						callbacks.onCompactReserveTokensChange(parseInt(newValue, 10));
+					case "compact-threshold":
+						callbacks.onCompactThresholdPercentChange(parseInt(newValue, 10));
 						break;
 					case "compact-keep-recent":
-						callbacks.onCompactKeepRecentTokensChange(parseInt(newValue, 10));
+						callbacks.onCompactKeepRecentPercentChange(parseInt(newValue, 10));
 						break;
 					case "show-images":
 						callbacks.onShowImagesChange(newValue === "true");

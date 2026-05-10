@@ -517,16 +517,15 @@ export async function main(args: string[], options?: MainOptions) {
 
 	const DEFAULT_EXTENSIONS = [
 		"claude-skills-loader",
+		"sentinel-footer",
 		"lmstudio",
 		"handoff",
-		"trigger-compact",
 		"subagent",
 		"summarize",
 		"question",
 		"questionnaire",
 		"claude-rules",
 		"todo",
-		"working-indicator",
 	];
 	const extDir = path.join(getPackageDir(), "examples", "extensions");
 	const defaultExtPaths = DEFAULT_EXTENSIONS.map((name) => {

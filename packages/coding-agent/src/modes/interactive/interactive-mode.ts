@@ -658,7 +658,6 @@ export class InteractiveMode {
 		this.primaryPane.addChild(this.widgetContainerAbove);
 		this.primaryPane.addChild(this.editorContainer);
 		this.primaryPane.addChild(this.widgetContainerBelow);
-		this.primaryPane.addChild(this.footer);
 
 		// Set up PaneContainer with the primary pane
 		this.paneContainer = new PaneContainer(paneId, this.primaryPane);
@@ -669,6 +668,9 @@ export class InteractiveMode {
 
 		// PaneContainer is the only child of TUI — all content lives inside panes
 		this.ui.addChild(this.paneContainer as Component);
+
+		// Footer stays as a direct TUI child so setExtensionFooter() can replace it
+		this.ui.addChild(this.footer);
 
 		this.ui.setFocus(this.editor);
 
@@ -3818,8 +3820,8 @@ export class InteractiveMode {
 			const selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
-					compactReserveTokens: this.settingsManager.getCompactionReserveTokens(),
-					compactKeepRecentTokens: this.settingsManager.getCompactionKeepRecentTokens(),
+					compactThresholdPercent: this.settingsManager.getCompactionThresholdPercent(),
+					compactKeepRecentPercent: this.settingsManager.getCompactionKeepRecentPercent(),
 					showImages: this.settingsManager.getShowImages(),
 					imageWidthCells: this.settingsManager.getImageWidthCells(),
 					autoResizeImages: this.settingsManager.getImageAutoResize(),
@@ -3850,11 +3852,11 @@ export class InteractiveMode {
 						this.session.setAutoCompactionEnabled(enabled);
 						this.footer.setAutoCompactEnabled(enabled);
 					},
-					onCompactReserveTokensChange: (tokens) => {
-						this.settingsManager.setCompactionReserveTokens(tokens);
+					onCompactThresholdPercentChange: (percent) => {
+						this.settingsManager.setCompactionThresholdPercent(percent);
 					},
-					onCompactKeepRecentTokensChange: (tokens) => {
-						this.settingsManager.setCompactionKeepRecentTokens(tokens);
+					onCompactKeepRecentPercentChange: (percent) => {
+						this.settingsManager.setCompactionKeepRecentPercent(percent);
 					},
 					onShowImagesChange: (enabled) => {
 						this.settingsManager.setShowImages(enabled);
@@ -5236,7 +5238,6 @@ export class InteractiveMode {
 
 	private static readonly CUST_EXTENSIONS = [
 		"handoff",
-		"trigger-compact",
 		"subagent",
 		"summarize",
 		"question",
