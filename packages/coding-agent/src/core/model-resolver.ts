@@ -469,6 +469,13 @@ export interface InitialModelResult {
 	model: Model<Api> | undefined;
 	thinkingLevel: ThinkingLevel;
 	fallbackMessage: string | undefined;
+	/**
+	 * Set when defaultProvider+defaultModelId from settings were configured but
+	 * the model registry did not yet contain that pair at resolution time.
+	 * Callers can re-attempt resolution after extension providers register.
+	 * Format: "<provider>/<modelId>"
+	 */
+	pendingSavedDefault?: string;
 }
 
 /**
@@ -529,6 +536,7 @@ export async function findInitialModel(options: {
 	}
 
 	// 3. Try saved default from settings
+	let pendingSavedDefault: string | undefined;
 	if (defaultProvider && defaultModelId) {
 		const found = modelRegistry.find(defaultProvider, defaultModelId);
 		if (found) {
@@ -538,10 +546,19 @@ export async function findInitialModel(options: {
 			}
 			return { model, thinkingLevel, fallbackMessage: undefined };
 		}
+		// Saved default exists in settings but isn't registered yet (e.g. lives in
+		// an extension-provided provider that hasn't bound yet). Signal it so the
+		// caller can retry after extensions register.
+		pendingSavedDefault = `${defaultProvider}/${defaultModelId}`;
 	}
 
 	// 4. Try first available model with valid API key
 	const availableModels = await modelRegistry.getAvailable();
+
+	const buildFallbackMessage = (chosen: Model<Api>): string | undefined =>
+		pendingSavedDefault
+			? `Saved default ${pendingSavedDefault} is not yet registered (likely a not-yet-bound extension provider). Using ${chosen.provider}/${chosen.id}.`
+			: undefined;
 
 	if (availableModels.length > 0) {
 		// Try to find a default model from known providers
@@ -549,16 +566,26 @@ export async function findInitialModel(options: {
 			const defaultId = defaultModelPerProvider[provider];
 			const match = availableModels.find((m) => m.provider === provider && m.id === defaultId);
 			if (match) {
-				return { model: match, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+				return {
+					model: match,
+					thinkingLevel: DEFAULT_THINKING_LEVEL,
+					fallbackMessage: buildFallbackMessage(match),
+					pendingSavedDefault,
+				};
 			}
 		}
 
 		// If no default found, use first available
-		return { model: availableModels[0], thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+		return {
+			model: availableModels[0],
+			thinkingLevel: DEFAULT_THINKING_LEVEL,
+			fallbackMessage: buildFallbackMessage(availableModels[0]),
+			pendingSavedDefault,
+		};
 	}
 
 	// 5. No model found
-	return { model: undefined, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+	return { model: undefined, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined, pendingSavedDefault };
 }
 
 /**

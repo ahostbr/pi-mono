@@ -547,6 +547,7 @@ export async function main(args: string[], options?: MainOptions) {
 		agentDir,
 		sessionManager,
 		sessionStartEvent,
+		previousModel,
 	}) => {
 		const services = await createAgentSessionServices({
 			cwd,
@@ -593,6 +594,14 @@ export async function main(args: string[], options?: MainOptions) {
 			settingsManager,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
+
+		// previousModel (passed by /new and /fork) preserves the user's current
+		// in-session model selection across session replacement, bypassing the
+		// registry-dependent findInitialModel path which can pick a fallback when
+		// extension-provided providers haven't registered yet.
+		if (previousModel) {
+			sessionOptions.model = previousModel;
+		}
 
 		if (parsed.apiKey) {
 			if (!sessionOptions.model) {

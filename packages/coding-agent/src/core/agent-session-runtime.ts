@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession } from "./agent-session.js";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.js";
 import type { ReplacedSessionContext, SessionShutdownEvent, SessionStartEvent } from "./extensions/index.js";
@@ -31,6 +32,16 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	agentDir: string;
 	sessionManager: SessionManager;
 	sessionStartEvent?: SessionStartEvent;
+	/**
+	 * When set, the factory should use this model as the initial model rather
+	 * than resolving from CLI args / scoped models / saved defaults / provider
+	 * fallbacks. Used by /new and /fork to preserve the user's current
+	 * in-session model selection across session replacement. The previous
+	 * model object is passed directly so we don't depend on registry state at
+	 * the moment of resolution (which can race with extension provider
+	 * registration).
+	 */
+	previousModel?: Model<Api>;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
 /**
@@ -74,6 +85,7 @@ export class AgentSessionRuntime {
 		private readonly createRuntime: CreateAgentSessionRuntimeFactory,
 		private _diagnostics: AgentSessionRuntimeDiagnostic[] = [],
 		private _modelFallbackMessage?: string,
+		private _pendingSavedDefault?: string,
 	) {}
 
 	get services(): AgentSessionServices {
@@ -94,6 +106,10 @@ export class AgentSessionRuntime {
 
 	get modelFallbackMessage(): string | undefined {
 		return this._modelFallbackMessage;
+	}
+
+	get pendingSavedDefault(): string | undefined {
+		return this._pendingSavedDefault;
 	}
 
 	/** Expose the runtime factory for creating independent sessions (e.g., split panes). */
@@ -166,14 +182,56 @@ export class AgentSessionRuntime {
 		this._services = result.services;
 		this._diagnostics = result.diagnostics;
 		this._modelFallbackMessage = result.modelFallbackMessage;
+		this._pendingSavedDefault = result.pendingSavedDefault;
 	}
 
 	private async finishSessionReplacement(withSession?: (ctx: ReplacedSessionContext) => Promise<void>): Promise<void> {
 		if (this.rebindSession) {
 			await this.rebindSession(this.session);
 		}
+		await this.resolvePendingSavedDefault();
 		if (withSession) {
 			await withSession(this.session.createReplacedSessionContext());
+		}
+	}
+
+	/**
+	 * If initial model resolution fell back to a provider default because the
+	 * user's saved default wasn't yet registered (e.g. lived in an
+	 * extension-provided provider that hadn't bound yet), retry the lookup now
+	 * that extensions have bound. Swaps in the saved model if found.
+	 *
+	 * Idempotent: clears the pending flag whether or not the swap succeeds, so a
+	 * single retry per session replacement.
+	 *
+	 * Hosts should call this after the initial `rebindCurrentSession()` (or
+	 * equivalent extension binding) to cover the cold-startup case where the
+	 * runtime is constructed before the host has wired `setRebindSession`.
+	 */
+	async resolvePendingSavedDefault(): Promise<void> {
+		const pending = this._pendingSavedDefault;
+		if (!pending) return;
+		this._pendingSavedDefault = undefined;
+
+		const slashIdx = pending.indexOf("/");
+		if (slashIdx <= 0) return;
+		const provider = pending.slice(0, slashIdx);
+		const modelId = pending.slice(slashIdx + 1);
+
+		const found = this._services.modelRegistry.find(provider, modelId);
+		if (!found) return;
+		if (!this._services.modelRegistry.hasConfiguredAuth(found)) return;
+
+		const current = this._session.model;
+		if (current && current.provider === provider && current.id === modelId) return;
+
+		try {
+			await this._session.setModel(found);
+			this._modelFallbackMessage = undefined;
+		} catch (err) {
+			// Swap is best-effort; keep the prior model and fallback message so the
+			// user still sees the diagnostic.
+			console.error(`[agent-session-runtime] Failed to swap to saved default ${pending}:`, err);
 		}
 	}
 
@@ -219,6 +277,7 @@ export class AgentSessionRuntime {
 			sessionManager.newSession({ parentSession: options.parentSession });
 		}
 
+		const previousModel = this.session.model;
 		await this.teardownCurrent("new", sessionManager.getSessionFile());
 		this.apply(
 			await this.createRuntime({
@@ -226,6 +285,7 @@ export class AgentSessionRuntime {
 				agentDir: this.services.agentDir,
 				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
+				previousModel,
 			}),
 		);
 		if (options?.setup) {
@@ -270,6 +330,7 @@ export class AgentSessionRuntime {
 				throw new Error("Persisted session is missing a session file");
 			}
 			const sessionDir = this.session.sessionManager.getSessionDir();
+			const previousModel = this.session.model;
 			if (!targetLeafId) {
 				const sessionManager = SessionManager.create(this.cwd, sessionDir);
 				sessionManager.newSession({ parentSession: currentSessionFile });
@@ -280,6 +341,7 @@ export class AgentSessionRuntime {
 						agentDir: this.services.agentDir,
 						sessionManager,
 						sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+						previousModel,
 					}),
 				);
 				await this.finishSessionReplacement(options?.withSession);
@@ -299,12 +361,14 @@ export class AgentSessionRuntime {
 					agentDir: this.services.agentDir,
 					sessionManager,
 					sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+					previousModel,
 				}),
 			);
 			await this.finishSessionReplacement(options?.withSession);
 			return { cancelled: false, selectedText };
 		}
 
+		const previousModel = this.session.model;
 		const sessionManager = this.session.sessionManager;
 		if (!targetLeafId) {
 			sessionManager.newSession({ parentSession: this.session.sessionFile });
@@ -318,6 +382,7 @@ export class AgentSessionRuntime {
 				agentDir: this.services.agentDir,
 				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+				previousModel,
 			}),
 		);
 		await this.finishSessionReplacement(options?.withSession);
@@ -401,6 +466,7 @@ export async function createAgentSessionRuntime(
 		createRuntime,
 		result.diagnostics,
 		result.modelFallbackMessage,
+		result.pendingSavedDefault,
 	);
 }
 

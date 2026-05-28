@@ -87,6 +87,13 @@ export interface CreateAgentSessionResult {
 	extensionsResult: LoadExtensionsResult;
 	/** Warning if session was restored with a different model than saved */
 	modelFallbackMessage?: string;
+	/**
+	 * Set when the user's saved default provider+model was configured in settings
+	 * but the model registry did not yet know about it (e.g. extension provider
+	 * not yet bound). Format: "<provider>/<modelId>". The runtime uses this to
+	 * re-attempt resolution after extensions bind.
+	 */
+	pendingSavedDefault?: string;
 }
 
 // Re-exports
@@ -217,6 +224,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	let model = options.model;
 	let modelFallbackMessage: string | undefined;
+	let pendingSavedDefault: string | undefined;
 
 	// If session has data, try to restore model from it
 	if (!model && hasExistingSession && existingSession.model) {
@@ -240,10 +248,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			modelRegistry,
 		});
 		model = result.model;
+		pendingSavedDefault = result.pendingSavedDefault;
 		if (!model) {
 			modelFallbackMessage = formatNoModelsAvailableMessage();
 		} else if (modelFallbackMessage) {
 			modelFallbackMessage += `. Using ${model.provider}/${model.id}`;
+		} else if (result.fallbackMessage) {
+			modelFallbackMessage = result.fallbackMessage;
 		}
 	}
 
@@ -409,5 +420,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		session,
 		extensionsResult,
 		modelFallbackMessage,
+		pendingSavedDefault,
 	};
 }

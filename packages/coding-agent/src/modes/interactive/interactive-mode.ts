@@ -691,6 +691,12 @@ export class InteractiveMode {
 		// Initialize extensions first so resources are shown before messages
 		await this.rebindCurrentSession();
 
+		// Cold-startup recovery: if the initial findInitialModel fell back to a
+		// provider default because the user's saved default lived in an
+		// extension-provided provider not yet bound, retry now that extensions
+		// have registered their providers.
+		await this.runtimeHost.resolvePendingSavedDefault();
+
 		// Render initial messages AFTER showing loaded resources
 		this.renderInitialMessages();
 

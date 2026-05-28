@@ -117,6 +117,9 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 
 		await rebindSession();
 
+		// Cold-startup recovery — see interactive-mode.ts for rationale.
+		await runtimeHost.resolvePendingSavedDefault();
+
 		if (initialMessage) {
 			await session.prompt(initialMessage, { images: initialImages });
 		}
