@@ -450,12 +450,18 @@ let BUILTIN_THEMES: Record<string, ThemeJson> | undefined;
 function getBuiltinThemes(): Record<string, ThemeJson> {
 	if (!BUILTIN_THEMES) {
 		const themesDir = getThemesDir();
-		const darkPath = path.join(themesDir, "dark.json");
-		const lightPath = path.join(themesDir, "light.json");
-		BUILTIN_THEMES = {
-			dark: JSON.parse(fs.readFileSync(darkPath, "utf-8")) as ThemeJson,
-			light: JSON.parse(fs.readFileSync(lightPath, "utf-8")) as ThemeJson,
-		};
+		const themes: Record<string, ThemeJson> = {};
+		for (const file of fs.readdirSync(themesDir)) {
+			if (!file.endsWith(".json") || file === "theme-schema.json") continue;
+			const name = file.slice(0, -5);
+			const filePath = path.join(themesDir, file);
+			try {
+				themes[name] = JSON.parse(fs.readFileSync(filePath, "utf-8")) as ThemeJson;
+			} catch (err) {
+				console.error(`[theme] Failed to load builtin theme "${name}":`, err);
+			}
+		}
+		BUILTIN_THEMES = themes;
 	}
 	return BUILTIN_THEMES;
 }
